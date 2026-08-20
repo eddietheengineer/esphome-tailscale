@@ -216,6 +216,23 @@ microlink_t *microlink_init(const microlink_config_t *config) {
         }
     }
 
+    /* Single-peer mode: restrict to exactly one peer. Reuses the
+     * priority_peer_ip mechanism — with max_peers=1 the priority peer
+     * is the only peer that gets a WG slot and DISCO probes. */
+#ifdef CONFIG_ML_SINGLE_PEER_IP
+    if (strlen(CONFIG_ML_SINGLE_PEER_IP) > 0) {
+        ml->config.max_peers = 1;
+        ml->config.priority_peer_ip = microlink_parse_ip(CONFIG_ML_SINGLE_PEER_IP);
+        if (ml->config.priority_peer_ip) {
+            ESP_LOGI(TAG, "Single-peer mode: only %s (max_peers forced to 1)",
+                     CONFIG_ML_SINGLE_PEER_IP);
+        } else {
+            ESP_LOGW(TAG, "ML_SINGLE_PEER_IP set but failed to parse: %s",
+                     CONFIG_ML_SINGLE_PEER_IP);
+        }
+    }
+#endif
+
     /* Load or generate persistent keys */
     if (load_or_generate_keys(ml) != ESP_OK) {
         free(ml);
