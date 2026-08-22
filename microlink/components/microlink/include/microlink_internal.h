@@ -5,12 +5,16 @@
  * Architecture: 5 FreeRTOS tasks communicating via queues and event groups.
  * No shared mutable state between tasks - each owns its data exclusively.
  *
- * Tasks:
- *   net_io   (Core 0, pri 6)  - Unified select() on all sockets
- *   derp_tx  (Core 0, pri 7)  - Sole DERP TLS writer
- *   coord    (Core 1, pri 5)  - Control plane (Noise, HTTP/2, registration)
- *   wg_mgr   (Core 1, pri 7)  - WireGuard + DISCO + peer management
+ * Tasks (core is Kconfig-configurable; defaults shown for ESPHome safety):
+ *   net_io   (Core 0, pri 7)  - Unified select() on all sockets
+ *   derp_tx  (Core 0, pri 5)  - Sole DERP TLS writer
+ *   derp_rx  (Core 0, pri 5)  - DERP TLS reader
+ *   coord    (Core 0, pri 5)  - Control plane (Noise, HTTP/2, registration)
+ *   wg_mgr   (Core 0, pri 7)  - WireGuard + DISCO + peer management
  *   app      (unpinned, pri 3) - User application (external, not ours)
+ *
+ * Core defaults are 0 to avoid conflicting with ESPHome's loopTask
+ * (Core 1, pri 1). Override via CONFIG_ML_COORD_CORE / CONFIG_ML_WG_MGR_CORE.
  */
 
 #pragma once
@@ -63,11 +67,25 @@ extern "C" {
 
 #define ML_TASK_COORD_STACK     (12 * 1024)
 #define ML_TASK_COORD_PRIO      5
-#define ML_TASK_COORD_CORE      1
+/* Core is Kconfig-configurable (CONFIG_ML_COORD_CORE). Default 0 to avoid
+ * conflicting with ESPHome's loopTask (Core 1, pri 1). Override to 1 only
+ * in standalone (non-ESPHome) builds where Core 1 is free. */
+#ifndef CONFIG_ML_COORD_CORE
+#define ML_TASK_COORD_CORE      0
+#else
+#define ML_TASK_COORD_CORE      CONFIG_ML_COORD_CORE
+#endif
 
 #define ML_TASK_WG_MGR_STACK    (8 * 1024)
 #define ML_TASK_WG_MGR_PRIO     7
-#define ML_TASK_WG_MGR_CORE     1
+/* Core is Kconfig-configurable (CONFIG_ML_WG_MGR_CORE). Default 0 to avoid
+ * conflicting with ESPHome's loopTask (Core 1, pri 1). Override to 1 only
+ * in standalone (non-ESPHome) builds where Core 1 is free. */
+#ifndef CONFIG_ML_WG_MGR_CORE
+#define ML_TASK_WG_MGR_CORE     0
+#else
+#define ML_TASK_WG_MGR_CORE     CONFIG_ML_WG_MGR_CORE
+#endif
 
 /* Queue depths */
 /* TX 16->64 (2026-05-27): absorb speedtest bursts so packets queue instead of
@@ -450,6 +468,14 @@ struct microlink_s {
      * common case is a never-registered board or one that just went
      * through microlink_factory_reset. */
     bool identity_persistent;
+
+    /* Single-peer mode (CONFIG_ML_SINGLE_PEER_IP non-empty): only
+     * config.priority_peer_ip may hold a peer slot — add_peer() rejects
+     * every other peer, and the NVS fast-boot cache / web-UI settings
+     * must not override the peer choice or the max_peers=1 clamp.
+     * Set once in microlink_init() before any task starts; read-only
+     * afterwards (wg_mgr task). */
+    bool single_peer_mode;
 
     /* Identity from the last RegisterResponse — for display only. A failed
      * registration is detected from RegisterResponse.Error / NodeKeyExpired /

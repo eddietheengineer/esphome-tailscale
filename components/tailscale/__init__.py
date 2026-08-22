@@ -40,6 +40,9 @@ CONF_DISABLE_TELEMETRY = "disable_telemetry"
 CONF_NETCHECK_OVERRIDE = "netcheck_override"
 CONF_NETCHECK_OVERRIDE_THRESHOLD = "netcheck_override_threshold"
 CONF_IPN_VERSION = "ipn_version"
+CONF_SINGLE_PEER_IP = "single_peer_ip"
+CONF_WG_MGR_CORE = "wg_mgr_core"
+CONF_COORD_CORE = "coord_core"
 tailscale_ns = cg.esphome_ns.namespace("tailscale")
 TailscaleComponent = tailscale_ns.class_("TailscaleComponent", cg.Component)
 
@@ -66,6 +69,19 @@ CONFIG_SCHEMA = cv.Schema(
         # Set it only to clear the admin console's "Device is too old" gate,
         # e.g. ipn_version: "1.98.9". See README (Troubleshooting).
         cv.Optional(CONF_IPN_VERSION, default=""): cv.string,
+        # Point-to-point mode: only this peer gets a WireGuard slot and
+        # DISCO probes; every other tailnet node is rejected at peer-add
+        # time. Minimizes CPU and RAM for one-ESP-to-one-host setups
+        # (e.g. a sensor talking to one Home Assistant box). Forces
+        # max_peers to 1 so the compiled peer table shrinks to match.
+        cv.Optional(CONF_SINGLE_PEER_IP): cv.ipv4address,
+        # CPU core (0 or 1) to pin microlink's high-priority tasks to.
+        # Default 0 keeps them off ESPHome's loopTask (Core 1, priority 1),
+        # which the priority-7 WireGuard task starved into task-watchdog
+        # reboots when both were pinned to Core 1. Set to 1 only in
+        # standalone (non-ESPHome) builds where Core 1 is free.
+        cv.Optional(CONF_WG_MGR_CORE, default=0): cv.int_range(min=0, max=1),
+        cv.Optional(CONF_COORD_CORE, default=0): cv.int_range(min=0, max=1),
     }
 )
 
@@ -99,7 +115,23 @@ async def to_code(config):
     # time from CONFIG_ML_MAX_PEERS (default 16), and microlink_init() clamps the
     # runtime config to that compile-time ceiling. Propagate the YAML value into
     # sdkconfig so the compiled ceiling matches the runtime intent.
-    add_idf_sdkconfig_option("CONFIG_ML_MAX_PEERS", config[CONF_MAX_PEERS])
+    #
+    # Single-peer mode restricts the device to exactly one peer, so the
+    # compiled table only needs one slot — force CONFIG_ML_MAX_PEERS=1 to
+    # get the RAM savings (the runtime max_peers is clamped to the
+    # compile-time ceiling in microlink_init either way).
+    single_peer_ip = config.get(CONF_SINGLE_PEER_IP)
+    if single_peer_ip is not None:
+        add_idf_sdkconfig_option("CONFIG_ML_SINGLE_PEER_IP", str(single_peer_ip))
+        add_idf_sdkconfig_option("CONFIG_ML_MAX_PEERS", 1)
+    else:
+        add_idf_sdkconfig_option("CONFIG_ML_SINGLE_PEER_IP", "")
+        add_idf_sdkconfig_option("CONFIG_ML_MAX_PEERS", config[CONF_MAX_PEERS])
+
+    # Task core pinning (Kconfig ML_WG_MGR_CORE / ML_COORD_CORE). Default 0
+    # keeps microlink's high-priority tasks off ESPHome's loopTask.
+    add_idf_sdkconfig_option("CONFIG_ML_WG_MGR_CORE", config[CONF_WG_MGR_CORE])
+    add_idf_sdkconfig_option("CONFIG_ML_COORD_CORE", config[CONF_COORD_CORE])
 
     # Sensors are created via platform YAML files (binary_sensor.py, text_sensor.py, sensor.py)
     # They are auto-loaded and auto-configured - user doesn't need to add them manually

@@ -421,6 +421,9 @@ tailscale:
   max_peers: 16                          # optional, default 16, range 1–64
   login_server: ""                       # optional, empty → Tailscale SaaS; set for Headscale / self-hosted
   netcheck_override: false               # optional, default false — pick the DERP region by measured latency
+  single_peer_ip: ""                     # optional — point-to-point mode, see below
+  wg_mgr_core: 0                         # optional, default 0 — CPU core for the WireGuard/DISCO task
+  coord_core: 0                          # optional, default 0 — CPU core for the control-plane task
 ```
 
 | Option | Default | Description |
@@ -432,6 +435,9 @@ tailscale:
 | `disable_telemetry` | `false` | Set to `true` to turn off the anonymous telemetry (see [Telemetry](#telemetry)). |
 | `netcheck_override` | `false` | Measure the round-trip time to every DERP region and use the fastest one as the node's home relay, instead of the region the control plane reports. See *Picking the DERP region* below before enabling. |
 | `netcheck_override_threshold` | `50ms` | Only switch when the measured region is at least this much faster than the current one. Ignored unless `netcheck_override` is `true`. Prevents flapping between regions with near-identical latency. |
+| `single_peer_ip` | *(unset)* | Point-to-point mode: only this Tailscale IP gets a WireGuard slot and DISCO probes — every other tailnet node is rejected at peer-add time, and the web-UI priority-peer / max-peers settings can't override it. For one-ESP-to-one-host setups (e.g. a sensor talking to one Home Assistant box): minimizes CPU and RAM. Forces `max_peers` to 1 (the compiled peer table shrinks to match). |
+| `wg_mgr_core` | `0` | CPU core (0 or 1) to pin microlink's WireGuard/DISCO manager task to. Default 0 keeps the priority-7 task off ESPHome's loop task (Core 1, priority 1) — pinning both to Core 1 is what starved the loop task into task-watchdog reboots. Set to 1 only in standalone (non-ESPHome) builds where Core 1 is free. |
+| `coord_core` | `0` | CPU core (0 or 1) to pin microlink's control-plane task to. Same rationale as `wg_mgr_core`. |
 
 > **No `update_interval`.** The component is fully event-driven: sensors publish only when the underlying state actually changes. There is no polling loop to tune — and nothing to reduce CPU/network cost by raising.
 
