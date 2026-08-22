@@ -43,11 +43,13 @@ menu "MicroLink V2 Configuration"
         help
             When set, the device maintains a WireGuard tunnel and
             sends DISCO probes to ONLY this peer. All other nodes
-            in the tailnet are ignored. This minimizes CPU and RAM
-            for point-to-point setups (e.g. one ESP talking to
-            one Home Assistant server).
+            in the tailnet are rejected at peer-add time. This
+            minimizes CPU and RAM for point-to-point setups
+            (e.g. one ESP talking to one Home Assistant server).
 
-            Implies ML_MAX_PEERS=1 and overrides ML_PRIORITY_PEER_IP.
+            Set ML_MAX_PEERS=1 as well to shrink the static peer
+            array (RAM savings). Overrides ML_PRIORITY_PEER_IP and
+            the web-UI priority-peer / max-peers settings.
             Leave empty for normal multi-peer behavior.
 
 

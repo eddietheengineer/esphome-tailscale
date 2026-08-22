@@ -218,12 +218,15 @@ microlink_t *microlink_init(const microlink_config_t *config) {
 
     /* Single-peer mode: restrict to exactly one peer. Reuses the
      * priority_peer_ip mechanism — with max_peers=1 the priority peer
-     * is the only peer that gets a WG slot and DISCO probes. */
+     * is the only peer that gets a WG slot and DISCO probes. The
+     * single_peer_mode flag makes add_peer() reject every other peer
+     * and keeps the NVS overrides below from undoing the restriction. */
 #ifdef CONFIG_ML_SINGLE_PEER_IP
     if (strlen(CONFIG_ML_SINGLE_PEER_IP) > 0) {
         ml->config.max_peers = 1;
         ml->config.priority_peer_ip = microlink_parse_ip(CONFIG_ML_SINGLE_PEER_IP);
         if (ml->config.priority_peer_ip) {
+            ml->single_peer_mode = true;
             ESP_LOGI(TAG, "Single-peer mode: only %s (max_peers forced to 1)",
                      CONFIG_ML_SINGLE_PEER_IP);
         } else {
@@ -306,7 +309,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
 
         /* v2 overrides */
         uint8_t nvs_max = ml_config_get_max_peers(ml->config_httpd);
-        if (nvs_max > 0 && nvs_max <= ML_MAX_PEERS) {
+        if (!ml->single_peer_mode && nvs_max > 0 && nvs_max <= ML_MAX_PEERS) {
             ml->config.max_peers = nvs_max;
             ESP_LOGI(TAG, "Max peers overridden from NVS: %d", nvs_max);
         }
@@ -317,7 +320,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
             ESP_LOGI(TAG, "DISCO heartbeat overridden from NVS: %dms", nvs_hb);
         }
         uint32_t nvs_pip = ml_config_get_priority_peer_ip(ml->config_httpd);
-        if (nvs_pip > 0) {
+        if (!ml->single_peer_mode && nvs_pip > 0) {
             ml->config.priority_peer_ip = nvs_pip;
             char pip_str[16];
             microlink_ip_to_str(nvs_pip, pip_str);

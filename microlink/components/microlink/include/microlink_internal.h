@@ -469,6 +469,14 @@ struct microlink_s {
      * through microlink_factory_reset. */
     bool identity_persistent;
 
+    /* Single-peer mode (CONFIG_ML_SINGLE_PEER_IP non-empty): only
+     * config.priority_peer_ip may hold a peer slot — add_peer() rejects
+     * every other peer, and the NVS fast-boot cache / web-UI settings
+     * must not override the peer choice or the max_peers=1 clamp.
+     * Set once in microlink_init() before any task starts; read-only
+     * afterwards (wg_mgr task). */
+    bool single_peer_mode;
+
     /* Identity from the last RegisterResponse — for display only. A failed
      * registration is detected from RegisterResponse.Error / NodeKeyExpired /
      * AuthURL (the fields the reference client acts on), NOT from this block:

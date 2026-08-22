@@ -625,6 +625,13 @@ static void wg_register_peer(microlink_t *ml, ml_peer_t *p) {
     }
 }
 static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
+    /* Single-peer mode: only the configured peer may hold a slot.
+     * Silently skip everything else (same as the allowlist filter). */
+    if (ml->single_peer_mode &&
+        update->vpn_ip != ml->config.priority_peer_ip) {
+        return -1;
+    }
+
     /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
      * Still process updates for existing peers (they may become allowed later). */
     if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
@@ -1988,6 +1995,20 @@ void ml_wg_mgr_task(void *arg) {
     int cached = ml_peer_nvs_load_all(ml->peers, ML_MAX_PEERS);
     if (cached > 0) {
         ml->peer_count = cached;
+        if (ml->single_peer_mode) {
+            /* Single-peer mode: the fast-boot cache may hold peers from
+             * before the mode was enabled — drop everything but the one
+             * peer (it re-arrives from the first MapResponse if not
+             * cached). */
+            for (int i = 0; i < ml->peer_count; i++) {
+                if (ml->peers[i].active &&
+                    ml->peers[i].vpn_ip != ml->config.priority_peer_ip) {
+                    ESP_LOGI(TAG, "Single-peer mode: dropping cached peer %s",
+                             ml->peers[i].hostname);
+                    ml->peers[i].active = false;
+                }
+            }
+        }
         ESP_LOGI(TAG, "Pre-loaded %d cached peers from NVS", cached);
     }
 
