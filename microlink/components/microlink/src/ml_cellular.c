@@ -435,24 +435,28 @@ static esp_err_t network_register(void)
                 ESP_LOGI(TAG, "Signal: RSSI=%d (%d dBm)", rssi, s_cell.info.rssi_dbm);
             }
 
-            /* Power on GNSS engine for GPS-capable modems (SIM7670G, A7670G) */
+            /* Initialize GNSS for GPS-capable modems (SIM7670G, A7670G) */
+            /* Power the GPS antenna LNA (GPIO 4 on modem) */
+            at_send_cmd("AT+CGDRT=4,1", resp, sizeof(resp), AT_TIMEOUT_MS);
+            at_send_cmd("AT+CGSETV=4,1", resp, sizeof(resp), AT_TIMEOUT_MS);
+
+            /* Power on GNSS engine */
             at_send_cmd("AT+CGNSSPWR=1", resp, sizeof(resp), AT_TIMEOUT_MS);
             if (strstr(resp, "OK")) {
                 ESP_LOGI(TAG, "GNSS engine powered on");
             }
 
-            /* Route NMEA output to UART3 (dedicated GPS UART on GPIO 45/48) */
-            at_send_cmd("AT+CGNSSPORTSWITCH=2", resp, sizeof(resp), AT_TIMEOUT_MS);
-            if (strstr(resp, "OK")) {
-                ESP_LOGI(TAG, "NMEA output routed to UART3 (GPS UART)");
-            }
+            /* Multi-constellation mode: GPS+GLONASS+Galileo+BDS */
+            at_send_cmd("AT+CGNSSMODE=15", resp, sizeof(resp), AT_TIMEOUT_MS);
 
-            /* Start GNSS positioning in standalone mode */
-            at_send_cmd("AT+CGPS=1,1", resp, sizeof(resp), AT_TIMEOUT_MS);
-            if (strstr(resp, "OK")) {
-                ESP_LOGI(TAG, "GNSS positioning started");
-            }
+            /* Enable NMEA sentences: GGA, GSA, GSV, RMC */
+            at_send_cmd("AT+CGNSSNMEA=1,0,1,1,1,0", resp, sizeof(resp), AT_TIMEOUT_MS);
 
+            /* Start NMEA streaming on the AT UART */
+            at_send_cmd("AT+CGNSSTST=1", resp, sizeof(resp), AT_TIMEOUT_MS);
+            if (strstr(resp, "OK")) {
+                ESP_LOGI(TAG, "GNSS NMEA streaming started");
+            }
 
             return ESP_OK;
         }
