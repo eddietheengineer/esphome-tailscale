@@ -441,6 +441,18 @@ static esp_err_t network_register(void)
                 ESP_LOGI(TAG, "GNSS engine powered on");
             }
 
+            /* Route NMEA output to UART3 (dedicated GPS UART on GPIO 45/48) */
+            at_send_cmd("AT+CGNSSPORTSWITCH=2", resp, sizeof(resp), AT_TIMEOUT_MS);
+            if (strstr(resp, "OK")) {
+                ESP_LOGI(TAG, "NMEA output routed to UART3 (GPS UART)");
+            }
+
+            /* Start GNSS positioning in standalone mode */
+            at_send_cmd("AT+CGPS=1,1", resp, sizeof(resp), AT_TIMEOUT_MS);
+            if (strstr(resp, "OK")) {
+                ESP_LOGI(TAG, "GNSS positioning started");
+            }
+
 
             return ESP_OK;
         }
