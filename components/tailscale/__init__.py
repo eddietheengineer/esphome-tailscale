@@ -16,21 +16,10 @@ CODEOWNERS = ["@esphome-tailscale"]
 DEPENDENCIES = ["esp32"]
 AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "button", "switch", "text"]
 
-
-def _validate_network(config):
-    """Validate that either wifi or ethernet is configured."""
-    import esphome.core as core
-
-    full = core.CORE.raw_config
-    if "wifi" not in full and "ethernet" not in full:
-        raise cv.Invalid(
-            "The tailscale component requires either 'wifi:' or 'ethernet:' "
-            "to be configured. Add one of them to your YAML."
-        )
-    return config
-
-
-FINAL_VALIDATE_SCHEMA = _validate_network
+# NOTE: the upstream component required a `wifi:` or `ethernet:` component
+# (FINAL_VALIDATE_SCHEMA = _validate_network). That requirement is dropped here:
+# on the LILYGO T-SIM7670G-S3 the uplink is the SIM7670G's PPP netif (see the
+# `cellular:` block below), so no Wi-Fi/Ethernet is present or needed.
 
 CONF_AUTH_KEY = "auth_key"
 CONF_HOSTNAME = "hostname"
@@ -40,8 +29,39 @@ CONF_DISABLE_TELEMETRY = "disable_telemetry"
 CONF_NETCHECK_OVERRIDE = "netcheck_override"
 CONF_NETCHECK_OVERRIDE_THRESHOLD = "netcheck_override_threshold"
 CONF_IPN_VERSION = "ipn_version"
+CONF_CELLULAR = "cellular"
+CONF_CELLULAR_ENABLED = "enabled"
+CONF_CELLULAR_APN = "apn"
+CONF_CELLULAR_SIM_PIN = "sim_pin"
+CONF_CELLULAR_PPP_USER = "ppp_user"
+CONF_CELLULAR_PPP_PASS = "ppp_pass"
+CONF_CELLULAR_TX_PIN = "tx_pin"
+CONF_CELLULAR_RX_PIN = "rx_pin"
+CONF_CELLULAR_PWRKEY_PIN = "pwrkey_pin"
+CONF_CELLULAR_DTR_PIN = "dtr_pin"
 tailscale_ns = cg.esphome_ns.namespace("tailscale")
 TailscaleComponent = tailscale_ns.class_("TailscaleComponent", cg.Component)
+
+# The cellular (SIM7670G PPP) uplink. When enabled, the microlink's built-in
+# cellular driver powers the modem on, dials PPP, and uses the resulting PPP
+# netif as the Tailscale uplink — no Wi-Fi/Ethernet required.
+CELLULAR_SCHEMA = cv.Schema(
+    {
+        cv.Optional(CONF_CELLULAR_ENABLED, default=False): cv.boolean,
+        cv.Optional(CONF_CELLULAR_APN, default=""): cv.string,
+        cv.Optional(CONF_CELLULAR_SIM_PIN, default=""): cv.string,
+        cv.Optional(CONF_CELLULAR_PPP_USER, default=""): cv.string,
+        cv.Optional(CONF_CELLULAR_PPP_PASS, default=""): cv.string,
+        # Modem UART / power pins. 0 / -1 = use the microlink board-preset
+        # defaults (its tested LILYGO map: TX=11/RX=10/PWRKEY=18/DTR=9). The
+        # LilyGo "Standard" edition instead uses TX=4/RX=5/PWRKEY=46/DTR=7 —
+        # set these to match your board revision if the preset doesn't work.
+        cv.Optional(CONF_CELLULAR_TX_PIN, default=0): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_CELLULAR_RX_PIN, default=0): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_CELLULAR_PWRKEY_PIN, default=-1): cv.int_range(min=-1, max=48),
+        cv.Optional(CONF_CELLULAR_DTR_PIN, default=-1): cv.int_range(min=-1, max=48),
+    }
+)
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -66,6 +86,8 @@ CONFIG_SCHEMA = cv.Schema(
         # Set it only to clear the admin console's "Device is too old" gate,
         # e.g. ipn_version: "1.98.9". See README (Troubleshooting).
         cv.Optional(CONF_IPN_VERSION, default=""): cv.string,
+        # Cellular (SIM7670G PPP) uplink — see CELLULAR_SCHEMA above.
+        cv.Optional(CONF_CELLULAR, default={}): CELLULAR_SCHEMA,
     }
 )
 
@@ -90,6 +112,40 @@ async def to_code(config):
 
     cg.add(var.set_telemetry_disabled(config[CONF_DISABLE_TELEMETRY]))
     cg.add(var.set_ipn_version(config[CONF_IPN_VERSION]))
+
+    # Cellular (SIM7670G PPP) uplink. Hand the APN / SIM / PPP credentials to the
+    # C++ component (it calls ml_cellular_init() + ml_cellular_connect() in
+    # setup()), and enable the microlink's built-in cellular driver plus the
+    # LILYGO T-SIM7670G-S3 board preset (UART TX=11/RX=10, PWRKEY=18, DTR=9,
+    # RESET=17) via the microlink Kconfig.
+    cellular = config[CONF_CELLULAR]
+    cg.add(var.set_cellular_enabled(cellular[CONF_CELLULAR_ENABLED]))
+    cg.add(var.set_cellular_apn(cellular[CONF_CELLULAR_APN]))
+    cg.add(var.set_cellular_sim_pin(cellular[CONF_CELLULAR_SIM_PIN]))
+    cg.add(var.set_cellular_ppp_user(cellular[CONF_CELLULAR_PPP_USER]))
+    cg.add(var.set_cellular_ppp_pass(cellular[CONF_CELLULAR_PPP_PASS]))
+    if cellular[CONF_CELLULAR_ENABLED]:
+        add_idf_sdkconfig_option("CONFIG_ML_ENABLE_CELLULAR", True)
+        add_idf_sdkconfig_option("CONFIG_ML_BOARD_LILYGO_T_SIM7670G", True)
+        # Override the modem UART / power pins only if the user set them;
+        # otherwise the board preset's tested LILYGO map is used.
+        if cellular[CONF_CELLULAR_TX_PIN] != 0:
+            add_idf_sdkconfig_option(
+                "CONFIG_ML_CELLULAR_TX_PIN", cellular[CONF_CELLULAR_TX_PIN]
+            )
+        if cellular[CONF_CELLULAR_RX_PIN] != 0:
+            add_idf_sdkconfig_option(
+                "CONFIG_ML_CELLULAR_RX_PIN", cellular[CONF_CELLULAR_RX_PIN]
+            )
+        if cellular[CONF_CELLULAR_PWRKEY_PIN] != -1:
+            add_idf_sdkconfig_option(
+                "CONFIG_ML_CELLULAR_PWRKEY_PIN", cellular[CONF_CELLULAR_PWRKEY_PIN]
+            )
+        if cellular[CONF_CELLULAR_DTR_PIN] != -1:
+            add_idf_sdkconfig_option(
+                "CONFIG_ML_CELLULAR_DTR_PIN", cellular[CONF_CELLULAR_DTR_PIN]
+            )
+
     # Telemetry POSTs over HTTPS via ESP-IDF's esp_http_client, which ESPHome
     # excludes by default to save compile time — re-enable it. (TLS uses the
     # mbedtls certificate bundle already enabled below.)
@@ -121,6 +177,9 @@ async def to_code(config):
     add_idf_sdkconfig_option("CONFIG_LWIP_IPV6", True)
     add_idf_sdkconfig_option("CONFIG_LWIP_CHECK_THREAD_SAFETY", False)
     add_idf_sdkconfig_option("CONFIG_LWIP_MAX_SOCKETS", 24)
+    # The microlink's cellular (SIM7670G PPP) uplink uses ESP-IDF's PPP netif
+    # driver, which is compiled out unless CONFIG_PPP_SUPPORT is set.
+    add_idf_sdkconfig_option("CONFIG_PPP_SUPPORT", True)
     add_idf_sdkconfig_option("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE", True)
     add_idf_sdkconfig_option("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL", True)
     add_idf_sdkconfig_option("CONFIG_MBEDTLS_CHACHAPOLY_C", True)

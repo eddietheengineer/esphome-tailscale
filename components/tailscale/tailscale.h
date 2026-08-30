@@ -46,6 +46,11 @@ class TailscaleComponent : public Component {
   void set_telemetry_disabled(bool disabled) { this->telemetry_disabled_ = disabled; }
   void set_netcheck_override(bool enabled) { this->netcheck_override_ = enabled; }
   void set_netcheck_override_threshold(uint32_t ms) { this->netcheck_override_threshold_ms_ = ms; }
+  void set_cellular_enabled(bool enabled) { this->cellular_enabled_ = enabled; }
+  void set_cellular_apn(const std::string &apn) { this->cellular_apn_ = apn; }
+  void set_cellular_sim_pin(const std::string &pin) { this->cellular_sim_pin_ = pin; }
+  void set_cellular_ppp_user(const std::string &user) { this->cellular_ppp_user_ = user; }
+  void set_cellular_ppp_pass(const std::string &pass) { this->cellular_ppp_pass_ = pass; }
 #ifdef USE_SWITCH
   void set_debug_log_switch(switch_::Switch *sw) { this->debug_log_switch_ = sw; }
 #endif
@@ -138,9 +143,13 @@ class TailscaleComponent : public Component {
   // Static callbacks for microlink
   static void state_callback(microlink_t *ml, microlink_state_t state, void *user_data);
   static void peer_callback(microlink_t *ml, const microlink_peer_info_t *peer, void *user_data);
+  // Background task that brings the SIM7670G PPP uplink up (static so it can
+  // reach the protected bring_up_cellular_()).
+  static void cellular_init_task(void *arg);
 
   void publish_state_();
   void start_microlink_();
+  void bring_up_cellular_();
   void check_ip_config_(const char *vpn_ip);
   void send_ip_notification_();
   std::string detect_ha_route_(std::string *out_ip = nullptr);
@@ -157,6 +166,16 @@ class TailscaleComponent : public Component {
   bool telemetry_disabled_{false};
   bool netcheck_override_{false};
   uint32_t netcheck_override_threshold_ms_{50};
+
+  // Cellular (SIM7670G PPP) uplink config. When enabled, a background task
+  // brings the modem up (ml_cellular_init + ml_cellular_connect) and sets
+  // cellular_up_; the microlink then rides the PPP netif as its uplink.
+  bool cellular_enabled_{false};
+  std::string cellular_apn_;
+  std::string cellular_sim_pin_;
+  std::string cellular_ppp_user_;
+  std::string cellular_ppp_pass_;
+  bool cellular_up_{false};
 
   // Runtime
   microlink_t *ml_{nullptr};
