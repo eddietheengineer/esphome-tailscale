@@ -435,6 +435,13 @@ static esp_err_t network_register(void)
                 ESP_LOGI(TAG, "Signal: RSSI=%d (%d dBm)", rssi, s_cell.info.rssi_dbm);
             }
 
+            /* Power on GNSS engine for GPS-capable modems (SIM7670G, A7670G) */
+            at_send_cmd("AT+CGNSSPWR=1", resp, sizeof(resp), AT_TIMEOUT_MS);
+            if (strstr(resp, "OK")) {
+                ESP_LOGI(TAG, "GNSS engine powered on");
+            }
+
+
             return ESP_OK;
         }
 
