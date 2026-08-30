@@ -194,6 +194,26 @@ const char *ml_cellular_get_imei(void);
  */
 int ml_cellular_send_at(const char *cmd, char *response, size_t resp_size, int timeout_ms);
 
+/**
+ * RX byte callback — invoked with every chunk of UART RX data read by the
+ * cellular driver (AT command phase and AT socket mode; NOT during PPP).
+ * Allows external components (e.g. GPS NMEA parser) to inspect the modem's
+ * UART output without owning the UART driver.
+ *
+ * @param cb   Callback function (NULL to unregister)
+ * @param arg  Opaque pointer passed to cb on each invocation
+ */
+typedef void (*ml_cellular_rx_callback_t)(const uint8_t *data, size_t len, void *arg);
+void ml_cellular_set_rx_callback(ml_cellular_rx_callback_t cb, void *arg);
+
+/**
+ * Fire the registered RX callback with a chunk of UART data.
+ * Call from ml_at_socket.c (or any other module reading the modem UART)
+ * after each uart_read_bytes() to notify external consumers.
+ * Safe to call even when no callback is registered (no-op).
+ */
+void ml_cellular_rx_callback_fire(const uint8_t *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif
