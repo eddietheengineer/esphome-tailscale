@@ -251,6 +251,7 @@ static int at_cmd(const char *cmd, char *resp, size_t resp_size, int timeout_ms)
                                    resp_size - total - 1,
                                    pdMS_TO_TICKS(20));
         if (len > 0) {
+            ml_cellular_rx_callback_fire((const uint8_t *)(resp + total), len);
             total += len;
             resp[total] = '\0';
             /* Binary-safe: scan full buffer including past null bytes */
@@ -310,6 +311,7 @@ static int at_cmd_wait_urc(const char *cmd, const char *urc_prefix,
                                    resp_size - total - 1,
                                    pdMS_TO_TICKS(100));
         if (len > 0) {
+            ml_cellular_rx_callback_fire((const uint8_t *)(resp + total), len);
             total += len;
             resp[total] = '\0';
 
@@ -329,6 +331,7 @@ static int at_cmd_wait_urc(const char *cmd, const char *urc_prefix,
                                        resp_size - total - 1,
                                        pdMS_TO_TICKS(200));
                 if (len > 0) {
+                    ml_cellular_rx_callback_fire((const uint8_t *)(resp + total), len);
                     total += len;
                     resp[total] = '\0';
                 }
@@ -367,6 +370,7 @@ static int at_send_raw(const void *data, size_t len, int timeout_ms)
                                  sizeof(resp) - total - 1,
                                  pdMS_TO_TICKS(100));
         if (n > 0) {
+            ml_cellular_rx_callback_fire((const uint8_t *)(resp + total), n);
             total += n;
             resp[total] = '\0';
             if (strstr(resp, "OK") || strstr(resp, "ERROR")) {
@@ -468,6 +472,7 @@ static int at_read_data_chunk(int link_num, int max_bytes, int *out_remaining)
                                  sizeof(hdr) - hdr_total - 1,
                                  pdMS_TO_TICKS(20));
         if (n > 0) {
+            ml_cellular_rx_callback_fire((const uint8_t *)(hdr + hdr_total), n);
             hdr_total += n;
             hdr[hdr_total] = '\0';
 
@@ -527,6 +532,7 @@ static int at_read_data_chunk(int link_num, int max_bytes, int *out_remaining)
         int want = (actual_len > (int)sizeof(chunk)) ? (int)sizeof(chunk) : actual_len;
         int n = uart_read_bytes(UART_NUM, chunk, want, pdMS_TO_TICKS(20));
         if (n > 0) {
+            ml_cellular_rx_callback_fire(chunk, n);
             size_t w = ring_write(s, chunk, n);
             total_written += (int)w;
             actual_len -= n;
@@ -536,7 +542,8 @@ static int at_read_data_chunk(int link_num, int max_bytes, int *out_remaining)
     /* Phase 3: Consume trailing \r\nOK\r\n (don't care about exact content).
      * Short timeout — data is already flowing, just need to clear the tail. */
     uint8_t trail[32];
-    uart_read_bytes(UART_NUM, trail, sizeof(trail), pdMS_TO_TICKS(5));
+    int trail_len = uart_read_bytes(UART_NUM, trail, sizeof(trail), pdMS_TO_TICKS(5));
+    if (trail_len > 0) ml_cellular_rx_callback_fire(trail, trail_len);
 
     if (out_remaining) *out_remaining = remaining;
 
@@ -841,6 +848,7 @@ ssize_t ml_at_send(int fd, const void *buf, size_t len, int flags)
                                      sizeof(resp) - resp_len - 1,
                                      pdMS_TO_TICKS(50));
             if (n > 0) {
+                ml_cellular_rx_callback_fire((const uint8_t *)(resp + resp_len), n);
                 resp_len += n;
                 resp[resp_len] = '\0';
                 if (strchr(resp, '>')) {
@@ -1034,6 +1042,7 @@ ssize_t ml_at_sendto(int fd, const void *buf, size_t len, int flags,
                                  sizeof(resp) - resp_len - 1,
                                  pdMS_TO_TICKS(50));
         if (n > 0) {
+            ml_cellular_rx_callback_fire((const uint8_t *)(resp + resp_len), n);
             resp_len += n;
             resp[resp_len] = '\0';
             if (strchr(resp, '>')) { got_prompt = true; break; }

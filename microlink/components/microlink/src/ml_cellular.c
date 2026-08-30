@@ -59,6 +59,10 @@ static struct {
     bool uart_installed;
     ml_cellular_data_mode_t data_mode;
 
+    /* RX callback for external consumers (e.g. GPS NMEA parser) */
+    ml_cellular_rx_callback_t rx_callback;
+    void *rx_callback_arg;
+
     /* PPP */
     esp_netif_t *ppp_netif;
     TaskHandle_t ppp_task;
@@ -70,6 +74,14 @@ static struct {
     .state = ML_CELL_STATE_OFF,
     .data_mode = ML_DATA_MODE_NONE,
 };
+
+/* Fire the RX callback with a chunk of UART data (if registered). */
+static inline void rx_callback_fire(const uint8_t *data, size_t len)
+{
+    if (s_cell.rx_callback && len > 0) {
+        s_cell.rx_callback(data, len, s_cell.rx_callback_arg);
+    }
+}
 
 /* ============================================================================
  * AT Command Helpers (same proven pattern from sim7600_4g_test)
@@ -97,6 +109,7 @@ static int at_send_cmd(const char *cmd, char *response, size_t resp_size, int ti
                                    resp_size - total_read - 1,
                                    pdMS_TO_TICKS(100));
         if (len > 0) {
+            rx_callback_fire((const uint8_t *)(response + total_read), len);
             total_read += len;
             response[total_read] = '\0';
 
@@ -1034,6 +1047,17 @@ int ml_cellular_send_at(const char *cmd, char *response, size_t resp_size, int t
         return -1;
     }
     return at_send_cmd(cmd, response, resp_size, timeout_ms);
+}
+
+void ml_cellular_set_rx_callback(ml_cellular_rx_callback_t cb, void *arg)
+{
+    s_cell.rx_callback = cb;
+    s_cell.rx_callback_arg = arg;
+}
+
+void ml_cellular_rx_callback_fire(const uint8_t *data, size_t len)
+{
+    rx_callback_fire(data, len);
 }
 
 /* ============================================================================
