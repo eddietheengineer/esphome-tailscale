@@ -463,19 +463,26 @@ static esp_err_t network_register(void)
 
             /* Poll GPS position via AT+CGPSINFO */
             at_send_cmd("AT+CGPSINFO", resp, sizeof(resp), AT_TIMEOUT_MS);
-            /*
-             * Response: +CGPSINFO: lat,N/S,lon,E/W,date,time,alt,speed,course
-             * Example:  +CGPSINFO:1831.991202,N,07352.807509,E,250311,072809.3,44.1,0.0,0
-             * lat/lon in DDMM.MMMMMM format; date is DDMMYY
-             */
+            ESP_LOGI(TAG, "AT+CGPSINFO response: %.200s", resp);
+
             const char *p = strstr(resp, "+CGPSINFO:");
-            if (p) {
+            if (!p) {
+                ESP_LOGW(TAG, "AT+CGPSINFO: no +CGPSINFO: in response");
+            } else {
+                /*
+                 * Response: +CGPSINFO: lat,N/S,lon,E/W,date,time,alt,speed,course
+                 * Example:  +CGPSINFO:1831.991202,N,07352.807509,E,250311,072809.3,44.1,0.0,0
+                 * No fix:   +CGPSINFO:,,,,,,,,
+                 */
+                const char *data = p + 10;
+                while (*data == ' ') data++;  // skip optional space after colon
+
                 double lat = 0, lon = 0, alt = 0, speed = 0;
                 char ns = 0, ew = 0;
-                char date_str[8] = {0};
-                int n = sscanf(p + 10, "%lf,%c,%lf,%c,%7s,%*s,%lf,%lf",
-                               &lat, &ns, &lon, &ew, date_str, &alt, &speed);
-                ESP_LOGI(TAG, "AT+CGPSINFO raw: %.100s (parsed %d fields)", p, n);
+                int n = sscanf(data, "%lf,%c,%lf,%c,%*s,%*s,%lf,%lf",
+                               &lat, &ns, &lon, &ew, &alt, &speed);
+                ESP_LOGI(TAG, "AT+CGPSINFO parsed: n=%d lat=%.4f ns=%c lon=%.4f ew=%c alt=%.1f speed=%.1f",
+                         n, lat, ns, lon, ew, alt, speed);
 
                 if (n >= 4 && lat > 0 && lon > 0) {
                     int lat_deg = (int)(lat / 100);
