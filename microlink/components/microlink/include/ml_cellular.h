@@ -85,7 +85,14 @@ typedef struct {
     bool sim_ready;             /* SIM card is ready */
     bool registered;            /* Registered on network */
     bool data_connected;        /* PPP data connection active */
-} ml_cellular_info_t;
+    /* GPS (polled once during AT phase before PPP dials) */
+    bool gps_has_fix;           /* GNSS has a valid fix */
+    double gps_latitude;        /* Degrees (+N, -S) */
+    double gps_longitude;       /* Degrees (+E, -W) */
+    double gps_altitude;        /* Meters above sea level */
+    double gps_speed;           /* km/h */
+    double gps_hdop;            /* Horizontal dilution of precision */
+    int    gps_satellites;      /* Satellites in use */
 
 /* ============================================================================
  * Public API

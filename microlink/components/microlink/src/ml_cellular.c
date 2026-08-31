@@ -458,6 +458,41 @@ static esp_err_t network_register(void)
                 ESP_LOGI(TAG, "GNSS NMEA streaming started");
             }
 
+            /* Brief delay to let GNSS settle, then poll position */
+            vTaskDelay(pdMS_TO_TICKS(5000));
+
+            /* Poll GPS position via AT+CGPSINFO */
+            at_send_cmd("AT+CGPSINFO", resp, sizeof(resp), AT_TIMEOUT_MS);
+            /* Parse: +CGPSINFO: lat,N/S,lon,E/W,time,alt,speed,hdop,vsat,usat */
+            const char *p = strstr(resp, "+CGPSINFO:");
+            if (p) {
+                double lat = 0, lon = 0, alt = 0, speed = 0, hdop = 0;
+                int vsat = 0, usat = 0;
+                char ns = 0, ew = 0;
+                if (sscanf(p + 10, "%lf,%c,%lf,%c,%*s,%lf,%lf,%lf,%d,%d",
+                           &lat, &ns, &lon, &ew, &alt, &speed, &hdop, &vsat, &usat) >= 5) {
+                    int lat_deg = (int)(lat / 100);
+                    double lat_min = lat - lat_deg * 100;
+                    double lat_d = lat_deg + lat_min / 60.0;
+                    if (ns == 'S') lat_d = -lat_d;
+
+                    int lon_deg = (int)(lon / 100);
+                    double lon_min = lon - lon_deg * 100;
+                    double lon_d = lon_deg + lon_min / 60.0;
+                    if (ew == 'W') lon_d = -lon_d;
+
+                    s_cell.info.gps_has_fix = (usat > 0);
+                    s_cell.info.gps_latitude = lat_d;
+                    s_cell.info.gps_longitude = lon_d;
+                    s_cell.info.gps_altitude = alt;
+                    s_cell.info.gps_speed = speed;
+                    s_cell.info.gps_hdop = hdop;
+                    s_cell.info.gps_satellites = usat;
+
+                    ESP_LOGI(TAG, "GPS poll: lat=%.6f lon=%.6f alt=%.1f speed=%.1f sat=%d hdop=%.2f fix=%d",
+                             lat_d, lon_d, alt, speed, usat, hdop, (int)s_cell.info.gps_has_fix);
+                }
+            }
             return ESP_OK;
         }
 
