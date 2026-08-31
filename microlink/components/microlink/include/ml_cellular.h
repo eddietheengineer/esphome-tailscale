@@ -93,7 +93,7 @@ typedef struct {
     double gps_speed;           /* km/h */
     double gps_hdop;            /* Horizontal dilution of precision */
     int    gps_satellites;      /* Satellites in use */
-
+} ml_cellular_info_t;
 /* ============================================================================
  * Public API
  * ========================================================================== */
