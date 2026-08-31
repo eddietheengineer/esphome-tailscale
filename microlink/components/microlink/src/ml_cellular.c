@@ -458,8 +458,8 @@ static esp_err_t network_register(void)
                 ESP_LOGI(TAG, "GNSS NMEA streaming started");
             }
 
-            /* Brief delay to let GNSS settle, then poll position */
-            vTaskDelay(pdMS_TO_TICKS(5000));
+            /* Wait for GNSS to acquire satellites (cold start can take 30-60s) */
+            vTaskDelay(pdMS_TO_TICKS(30000));
 
             /* Poll GPS position via AT+CGPSINFO */
             at_send_cmd("AT+CGPSINFO", resp, sizeof(resp), AT_TIMEOUT_MS);
