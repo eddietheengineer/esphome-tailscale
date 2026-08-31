@@ -463,14 +463,21 @@ static esp_err_t network_register(void)
 
             /* Poll GPS position via AT+CGPSINFO */
             at_send_cmd("AT+CGPSINFO", resp, sizeof(resp), AT_TIMEOUT_MS);
-            /* Parse: +CGPSINFO: lat,N/S,lon,E/W,time,alt,speed,hdop,vsat,usat */
+            /*
+             * Response: +CGPSINFO: lat,N/S,lon,E/W,date,time,alt,speed,course
+             * Example:  +CGPSINFO:1831.991202,N,07352.807509,E,250311,072809.3,44.1,0.0,0
+             * lat/lon in DDMM.MMMMMM format; date is DDMMYY
+             */
             const char *p = strstr(resp, "+CGPSINFO:");
             if (p) {
-                double lat = 0, lon = 0, alt = 0, speed = 0, hdop = 0;
-                int vsat = 0, usat = 0;
+                double lat = 0, lon = 0, alt = 0, speed = 0;
                 char ns = 0, ew = 0;
-                if (sscanf(p + 10, "%lf,%c,%lf,%c,%*s,%lf,%lf,%lf,%d,%d",
-                           &lat, &ns, &lon, &ew, &alt, &speed, &hdop, &vsat, &usat) >= 5) {
+                char date_str[8] = {0};
+                int n = sscanf(p + 10, "%lf,%c,%lf,%c,%7s,%*s,%lf,%lf",
+                               &lat, &ns, &lon, &ew, date_str, &alt, &speed);
+                ESP_LOGI(TAG, "AT+CGPSINFO raw: %.100s (parsed %d fields)", p, n);
+
+                if (n >= 4 && lat > 0 && lon > 0) {
                     int lat_deg = (int)(lat / 100);
                     double lat_min = lat - lat_deg * 100;
                     double lat_d = lat_deg + lat_min / 60.0;
@@ -481,16 +488,18 @@ static esp_err_t network_register(void)
                     double lon_d = lon_deg + lon_min / 60.0;
                     if (ew == 'W') lon_d = -lon_d;
 
-                    s_cell.info.gps_has_fix = (usat > 0);
+                    s_cell.info.gps_has_fix = true;
                     s_cell.info.gps_latitude = lat_d;
                     s_cell.info.gps_longitude = lon_d;
                     s_cell.info.gps_altitude = alt;
                     s_cell.info.gps_speed = speed;
-                    s_cell.info.gps_hdop = hdop;
-                    s_cell.info.gps_satellites = usat;
+                    s_cell.info.gps_hdop = 0;
+                    s_cell.info.gps_satellites = 0;
 
-                    ESP_LOGI(TAG, "GPS poll: lat=%.6f lon=%.6f alt=%.1f speed=%.1f sat=%d hdop=%.2f fix=%d",
-                             lat_d, lon_d, alt, speed, usat, hdop, (int)s_cell.info.gps_has_fix);
+                    ESP_LOGI(TAG, "GPS fix: lat=%.6f lon=%.6f alt=%.1f speed=%.1f",
+                             lat_d, lon_d, alt, speed);
+                } else {
+                    ESP_LOGW(TAG, "GPS no fix yet (lat=%.4f lon=%.4f)", lat, lon);
                 }
             }
             return ESP_OK;
