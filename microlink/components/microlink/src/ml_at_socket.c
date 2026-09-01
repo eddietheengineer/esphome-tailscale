@@ -535,6 +535,7 @@ static int at_read_data_chunk(int link_num, int max_bytes, int *out_remaining)
 
     /* Phase 3: Consume trailing \r\nOK\r\n (don't care about exact content).
      * Short timeout — data is already flowing, just need to clear the tail. */
+    uint8_t trail[32];
     uart_read_bytes(UART_NUM, trail, sizeof(trail), pdMS_TO_TICKS(5));
 
     if (out_remaining) *out_remaining = remaining;

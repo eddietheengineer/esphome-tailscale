@@ -71,6 +71,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_HOSTNAME, default=""): cv.string,
         cv.Optional(CONF_MAX_PEERS, default=16): cv.int_range(min=1, max=64),
         cv.Optional(CONF_PRIORITY_PEER, default=""): cv.string,
+        cv.Optional(CONF_LOGIN_SERVER, default=""): cv.string,
         cv.Optional(CONF_DISABLE_TELEMETRY, default=False): cv.boolean,
         # Measure every DERP region and adopt the fastest one instead of the
         # region the control plane echoed back. Off by default: a home-region
