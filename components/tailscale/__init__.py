@@ -23,6 +23,7 @@ AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "button", "switch", "text
 
 CONF_AUTH_KEY = "auth_key"
 CONF_HOSTNAME = "hostname"
+CONF_MAX_PEERS = "max_peers"
 CONF_PRIORITY_PEER = "priority_peer"
 CONF_LOGIN_SERVER = "login_server"
 CONF_DISABLE_TELEMETRY = "disable_telemetry"
