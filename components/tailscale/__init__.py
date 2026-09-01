@@ -150,6 +150,9 @@ async def to_code(config):
             add_idf_sdkconfig_option(
                 "CONFIG_ML_CELLULAR_DTR_PIN", cellular[CONF_CELLULAR_DTR_PIN]
             )
+        # The microlink's cellular (SIM7670G PPP) uplink uses ESP-IDF's PPP
+        # netif driver, which is compiled out unless CONFIG_PPP_SUPPORT is set.
+        add_idf_sdkconfig_option("CONFIG_PPP_SUPPORT", True)
 
     # Telemetry POSTs over HTTPS via ESP-IDF's esp_http_client, which ESPHome
     # excludes by default to save compile time — re-enable it. (TLS uses the
@@ -182,9 +185,6 @@ async def to_code(config):
     add_idf_sdkconfig_option("CONFIG_LWIP_IPV6", True)
     add_idf_sdkconfig_option("CONFIG_LWIP_CHECK_THREAD_SAFETY", False)
     add_idf_sdkconfig_option("CONFIG_LWIP_MAX_SOCKETS", 24)
-    # The microlink's cellular (SIM7670G PPP) uplink uses ESP-IDF's PPP netif
-    # driver, which is compiled out unless CONFIG_PPP_SUPPORT is set.
-    add_idf_sdkconfig_option("CONFIG_PPP_SUPPORT", True)
     add_idf_sdkconfig_option("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE", True)
     add_idf_sdkconfig_option("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL", True)
     add_idf_sdkconfig_option("CONFIG_MBEDTLS_CHACHAPOLY_C", True)
