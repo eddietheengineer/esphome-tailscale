@@ -73,7 +73,7 @@ CONFIG_SCHEMA = cv.Schema(
         # VPN IP of the priority peer (guaranteed a WG slot). Validated as
         # IPv4 so a typo fails at config time instead of silently disabling
         # the priority peer at runtime (microlink_parse_ip() returns 0).
-        cv.Optional(CONF_PRIORITY_PEER): cv.IPv4,
+        cv.Optional(CONF_PRIORITY_PEER): cv.ipv4address,
         cv.Optional(CONF_LOGIN_SERVER, default=""): cv.string,
         cv.Optional(CONF_DISABLE_TELEMETRY, default=False): cv.boolean,
         # Measure every DERP region and adopt the fastest one instead of the
@@ -106,7 +106,7 @@ async def to_code(config):
     cg.add(var.set_max_peers(config[CONF_MAX_PEERS]))
 
     if config.get(CONF_PRIORITY_PEER) is not None:
-        cg.add(var.set_priority_peer(config[CONF_PRIORITY_PEER]))
+        cg.add(var.set_priority_peer(str(config[CONF_PRIORITY_PEER])))
 
     if config[CONF_LOGIN_SERVER]:
         cg.add(var.set_login_server(config[CONF_LOGIN_SERVER]))
