@@ -85,14 +85,6 @@ typedef struct {
     bool sim_ready;             /* SIM card is ready */
     bool registered;            /* Registered on network */
     bool data_connected;        /* PPP data connection active */
-    /* GPS (polled once during AT phase before PPP dials) */
-    bool gps_has_fix;           /* GNSS has a valid fix */
-    double gps_latitude;        /* Degrees (+N, -S) */
-    double gps_longitude;       /* Degrees (+E, -W) */
-    double gps_altitude;        /* Meters above sea level */
-    double gps_speed;           /* km/h */
-    double gps_hdop;            /* Horizontal dilution of precision */
-    int    gps_satellites;      /* Satellites in use */
 } ml_cellular_info_t;
 /* ============================================================================
  * Public API
@@ -200,26 +192,6 @@ const char *ml_cellular_get_imei(void);
  * @return Number of bytes received, or -1 on timeout
  */
 int ml_cellular_send_at(const char *cmd, char *response, size_t resp_size, int timeout_ms);
-
-/**
- * RX byte callback — invoked with every chunk of UART RX data read by the
- * cellular driver (AT command phase and AT socket mode; NOT during PPP).
- * Allows external components (e.g. GPS NMEA parser) to inspect the modem's
- * UART output without owning the UART driver.
- *
- * @param cb   Callback function (NULL to unregister)
- * @param arg  Opaque pointer passed to cb on each invocation
- */
-typedef void (*ml_cellular_rx_callback_t)(const uint8_t *data, size_t len, void *arg);
-void ml_cellular_set_rx_callback(ml_cellular_rx_callback_t cb, void *arg);
-
-/**
- * Fire the registered RX callback with a chunk of UART data.
- * Call from ml_at_socket.c (or any other module reading the modem UART)
- * after each uart_read_bytes() to notify external consumers.
- * Safe to call even when no callback is registered (no-op).
- */
-void ml_cellular_rx_callback_fire(const uint8_t *data, size_t len);
 
 #ifdef __cplusplus
 }
