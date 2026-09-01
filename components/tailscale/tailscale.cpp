@@ -190,6 +190,10 @@ void TailscaleComponent::start_microlink_() {
   config.auth_key = effective_key.c_str();
   config.device_name = this->hostname_.empty() ? nullptr : this->hostname_.c_str();
   config.max_peers = this->max_peers_;
+  // Priority peer: guaranteed a WG slot even when peer table is full.
+  if (!this->priority_peer_.empty()) {
+    config.priority_peer_ip = microlink_parse_ip(this->priority_peer_.c_str());
+  }
   config.ctrl_host = this->login_server_.empty() ? nullptr : this->login_server_.c_str();
   // Netcheck-driven home-DERP selection. Without this the region microlink
   // starts on is whatever the control plane echoed back, which never changes —

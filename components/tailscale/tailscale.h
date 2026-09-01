@@ -42,6 +42,7 @@ class TailscaleComponent : public Component {
   void set_hostname(const std::string &hostname) { this->hostname_ = hostname; }
   void set_ipn_version(const std::string &v) { this->ipn_version_ = v; }
   void set_max_peers(uint8_t max) { this->max_peers_ = max; }
+  void set_priority_peer(const std::string &ip) { this->priority_peer_ = ip; }
   void set_login_server(const std::string &server) { this->login_server_ = server; }
   void set_telemetry_disabled(bool disabled) { this->telemetry_disabled_ = disabled; }
   void set_netcheck_override(bool enabled) { this->netcheck_override_ = enabled; }
@@ -162,6 +163,7 @@ class TailscaleComponent : public Component {
   std::string hostname_;
   std::string ipn_version_;  // Hostinfo.IPNVersion; empty = report nothing (default)
   uint8_t max_peers_{16};
+  std::string priority_peer_;  // VPN IP of priority peer (e.g. "100.x.y.z")
   std::string login_server_;
   bool telemetry_disabled_{false};
   bool netcheck_override_{false};

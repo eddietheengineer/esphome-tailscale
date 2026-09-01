@@ -23,7 +23,7 @@ AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "button", "switch", "text
 
 CONF_AUTH_KEY = "auth_key"
 CONF_HOSTNAME = "hostname"
-CONF_MAX_PEERS = "max_peers"
+CONF_PRIORITY_PEER = "priority_peer"
 CONF_LOGIN_SERVER = "login_server"
 CONF_DISABLE_TELEMETRY = "disable_telemetry"
 CONF_NETCHECK_OVERRIDE = "netcheck_override"
@@ -69,7 +69,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_AUTH_KEY): cv.string,
         cv.Optional(CONF_HOSTNAME, default=""): cv.string,
         cv.Optional(CONF_MAX_PEERS, default=16): cv.int_range(min=1, max=64),
-        cv.Optional(CONF_LOGIN_SERVER, default=""): cv.string,
+        cv.Optional(CONF_PRIORITY_PEER, default=""): cv.string,
         cv.Optional(CONF_DISABLE_TELEMETRY, default=False): cv.boolean,
         # Measure every DERP region and adopt the fastest one instead of the
         # region the control plane echoed back. Off by default: a home-region
@@ -99,6 +99,9 @@ async def to_code(config):
     cg.add(var.set_auth_key(config[CONF_AUTH_KEY]))
     cg.add(var.set_hostname(config[CONF_HOSTNAME]))
     cg.add(var.set_max_peers(config[CONF_MAX_PEERS]))
+
+    if config[CONF_PRIORITY_PEER]:
+        cg.add(var.set_priority_peer(config[CONF_PRIORITY_PEER]))
 
     if config[CONF_LOGIN_SERVER]:
         cg.add(var.set_login_server(config[CONF_LOGIN_SERVER]))
