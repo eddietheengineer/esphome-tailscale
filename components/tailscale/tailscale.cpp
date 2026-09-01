@@ -17,6 +17,9 @@
 #include "lwip/tcpip.h"
 #include "nvs.h"
 #include "esp_sntp.h"
+#ifdef CONFIG_ML_ENABLE_CELLULAR
+#include "ml_cellular.h"
+#endif
 
 namespace esphome {
 namespace tailscale {
@@ -35,6 +38,12 @@ static void microlink_stop_task(void *arg) {
   microlink_destroy(ml);
   s_stop_in_progress.store(false);
   ESP_LOGI(TAG, "Microlink cleanup complete");
+  vTaskDelete(nullptr);
+}
+
+void TailscaleComponent::cellular_init_task(void *arg) {
+  auto *self = static_cast<TailscaleComponent *>(arg);
+  self->bring_up_cellular_();
   vTaskDelete(nullptr);
 }
 
@@ -110,7 +119,52 @@ void TailscaleComponent::setup() {
   }
 #endif
 
+  if (this->cellular_enabled_) {
+    ESP_LOGI(TAG, "Spawning cellular bring-up task (SIM7670G PPP)...");
+    xTaskCreate(TailscaleComponent::cellular_init_task, "ts_cellular", 8192, this, 5, nullptr);
+  }
+
   ESP_LOGI(TAG, "Waiting for network before starting...");
+}
+
+void TailscaleComponent::bring_up_cellular_() {
+#ifdef CONFIG_ML_ENABLE_CELLULAR
+  ESP_LOGI(TAG, "Bringing up cellular (SIM7670G PPP) uplink...");
+  ml_cellular_config_t cell_config = ML_CELLULAR_DEFAULT_CONFIG();
+  // UART pins come from the Kconfig board preset (LILYGO T-SIM7670G-S3:
+  // TX=GPIO11, RX=GPIO10). ML_CELLULAR_DEFAULT_CONFIG() hardcodes the
+  // XIAO/Waveshare 43/44, so override explicitly.
+  cell_config.tx_pin = CONFIG_ML_CELLULAR_TX_PIN;
+  cell_config.rx_pin = CONFIG_ML_CELLULAR_RX_PIN;
+  // APN / SIM PIN / PPP credentials from the ESPHome config override the
+  // Kconfig defaults. Empty values are left as NULL (auto-detect / no PIN).
+  if (!this->cellular_apn_.empty()) cell_config.apn = this->cellular_apn_.c_str();
+  if (!this->cellular_sim_pin_.empty()) cell_config.sim_pin = this->cellular_sim_pin_.c_str();
+  if (!this->cellular_ppp_user_.empty()) cell_config.ppp_user = this->cellular_ppp_user_.c_str();
+  if (!this->cellular_ppp_pass_.empty()) cell_config.ppp_pass = this->cellular_ppp_pass_.c_str();
+
+  esp_err_t err = ml_cellular_init(&cell_config);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Cellular init failed: %s (check wiring, SIM card, antenna, power)", esp_err_to_name(err));
+    return;
+  }
+  ml_cellular_info_t info;
+  if (ml_cellular_get_info(&info) == ESP_OK) {
+    ESP_LOGI(TAG, "Modem: %s IMEI=%s Operator=%s Signal=%d dBm", info.model, info.imei,
+             info.operator_name, info.rssi_dbm);
+  }
+  err = ml_cellular_connect();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Cellular data connect failed: %s", esp_err_to_name(err));
+    return;
+  }
+  ml_cellular_data_mode_t mode = ml_cellular_get_data_mode();
+  ESP_LOGI(TAG, "Cellular data active via %s",
+           mode == ML_DATA_MODE_PPP ? "PPP (lwIP sockets)" : "AT socket bridge");
+  this->cellular_up_ = true;
+#else
+  ESP_LOGW(TAG, "Cellular requested but CONFIG_ML_ENABLE_CELLULAR is not set");
+#endif
 }
 
 void TailscaleComponent::start_microlink_() {
@@ -136,6 +190,10 @@ void TailscaleComponent::start_microlink_() {
   config.auth_key = effective_key.c_str();
   config.device_name = this->hostname_.empty() ? nullptr : this->hostname_.c_str();
   config.max_peers = this->max_peers_;
+  // Priority peer: guaranteed a WG slot even when peer table is full.
+  if (!this->priority_peer_.empty()) {
+    config.priority_peer_ip = microlink_parse_ip(this->priority_peer_.c_str());
+  }
   config.ctrl_host = this->login_server_.empty() ? nullptr : this->login_server_.c_str();
   // Netcheck-driven home-DERP selection. Without this the region microlink
   // starts on is whatever the control plane echoed back, which never changes —
@@ -195,14 +253,14 @@ void TailscaleComponent::start_microlink_() {
 
 void TailscaleComponent::loop() {
   // Start microlink only after network is connected (and user hasn't disabled)
-  if (this->ml_ == nullptr && network::is_connected()) {
+  if (this->ml_ == nullptr && (this->cellular_up_ || network::is_connected())) {
     if (this->tailscale_user_enabled_ && !this->vpn_stopping_) {
       this->start_microlink_();
     }
   }
 
   // Publish static sensor values once after microlink starts (or network connects)
-  if (!this->initial_publish_done_ && network::is_connected()) {
+  if (!this->initial_publish_done_ && (this->cellular_up_ || network::is_connected())) {
     this->initial_publish_done_ = true;
     this->state_changed_ = true;
   }
