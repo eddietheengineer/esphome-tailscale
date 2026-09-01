@@ -280,6 +280,22 @@ void TailscaleComponent::start_microlink_() {
 }
 
 void TailscaleComponent::loop() {
+#ifdef CONFIG_ML_ENABLE_CELLULAR
+  // Detect cellular data link loss (PPP drop, carrier loss, modem reset) and
+  // redial. The bring-up task exits after a successful dial, so without this
+  // a mid-session drop would leave microlink riding a dead netif forever.
+  // data_connected is the driver's authoritative "link is up" flag (set on
+  // PPP IP acquisition / AT data start, cleared on IP loss / stop).
+  if (this->cellular_enabled_ && this->cellular_up_) {
+    ml_cellular_info_t cell_info;
+    if (ml_cellular_get_info(&cell_info) == ESP_OK && !cell_info.data_connected) {
+      ESP_LOGW(TAG, "Cellular data link lost — redialing");
+      this->cellular_up_ = false;
+      xTaskCreate(TailscaleComponent::cellular_init_task, "ts_cellular", 8192, this, 5, nullptr);
+    }
+  }
+#endif
+
   // Start microlink only after network is connected (and user hasn't disabled)
   if (this->ml_ == nullptr && (this->cellular_up_ || network::is_connected())) {
     if (this->tailscale_user_enabled_ && !this->vpn_stopping_) {
