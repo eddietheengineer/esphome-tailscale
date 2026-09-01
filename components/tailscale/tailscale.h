@@ -151,6 +151,7 @@ class TailscaleComponent : public Component {
   void publish_state_();
   void start_microlink_();
   void bring_up_cellular_();
+  bool try_cellular_dial_();
   void check_ip_config_(const char *vpn_ip);
   void send_ip_notification_();
   std::string detect_ha_route_(std::string *out_ip = nullptr);

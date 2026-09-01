@@ -127,9 +127,14 @@ void TailscaleComponent::setup() {
   ESP_LOGI(TAG, "Waiting for network before starting...");
 }
 
-void TailscaleComponent::bring_up_cellular_() {
+bool TailscaleComponent::try_cellular_dial_() {
 #ifdef CONFIG_ML_ENABLE_CELLULAR
-  ESP_LOGI(TAG, "Bringing up cellular (SIM7670G PPP) uplink...");
+  // Tear down any previous session first. deinit() is a no-op when the modem
+  // was never initialized, and otherwise stops a running/half-open PPP and
+  // uninstalls the UART — required because ml_cellular_init() is not
+  // re-entrant (uart_driver_install fails if the driver is already up).
+  ml_cellular_deinit();
+
   ml_cellular_config_t cell_config = ML_CELLULAR_DEFAULT_CONFIG();
   // UART pins come from the Kconfig board preset (LILYGO T-SIM7670G-S3:
   // TX=GPIO11, RX=GPIO10). ML_CELLULAR_DEFAULT_CONFIG() hardcodes the
@@ -146,7 +151,7 @@ void TailscaleComponent::bring_up_cellular_() {
   esp_err_t err = ml_cellular_init(&cell_config);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Cellular init failed: %s (check wiring, SIM card, antenna, power)", esp_err_to_name(err));
-    return;
+    return false;
   }
   ml_cellular_info_t info;
   if (ml_cellular_get_info(&info) == ESP_OK) {
@@ -156,12 +161,35 @@ void TailscaleComponent::bring_up_cellular_() {
   err = ml_cellular_connect();
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Cellular data connect failed: %s", esp_err_to_name(err));
-    return;
+    return false;
   }
   ml_cellular_data_mode_t mode = ml_cellular_get_data_mode();
   ESP_LOGI(TAG, "Cellular data active via %s",
            mode == ML_DATA_MODE_PPP ? "PPP (lwIP sockets)" : "AT socket bridge");
-  this->cellular_up_ = true;
+  return true;
+#else
+  return false;
+#endif
+}
+
+void TailscaleComponent::bring_up_cellular_() {
+#ifdef CONFIG_ML_ENABLE_CELLULAR
+  // Cellular dialing is flaky by nature (SIM warm-up, network registration,
+  // PDP activation), so retry with exponential backoff instead of giving up
+  // after one attempt.
+  int backoff_s = 30;
+  for (;;) {
+    ESP_LOGI(TAG, "Bringing up cellular (SIM7670G PPP) uplink...");
+    if (this->try_cellular_dial_()) {
+      this->cellular_up_ = true;
+      return;
+    }
+    ESP_LOGW(TAG, "Cellular bring-up failed — retrying in %d s", backoff_s);
+    for (int i = 0; i < backoff_s; i++) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    backoff_s = (backoff_s * 2 > 300) ? 300 : backoff_s * 2;
+  }
 #else
   ESP_LOGW(TAG, "Cellular requested but CONFIG_ML_ENABLE_CELLULAR is not set");
 #endif
