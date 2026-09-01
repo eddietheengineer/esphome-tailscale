@@ -178,7 +178,9 @@ class TailscaleComponent : public Component {
   std::string cellular_sim_pin_;
   std::string cellular_ppp_user_;
   std::string cellular_ppp_pass_;
-  bool cellular_up_{false};
+  // Written by the cellular dial task, read by loop() — atomic to match
+  // current_state_ above.
+  std::atomic<bool> cellular_up_{false};
 
   // Runtime
   microlink_t *ml_{nullptr};
