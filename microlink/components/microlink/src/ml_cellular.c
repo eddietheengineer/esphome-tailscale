@@ -648,7 +648,7 @@ static esp_err_t ppp_setup_and_dial(void)
     /* Create PPP network interface */
     esp_netif_inherent_config_t base_cfg = ESP_NETIF_INHERENT_DEFAULT_PPP();
     base_cfg.if_desc = "ml_ppp";
-    base_cfg.route_prio = 10;   /* Lower priority than WiFi (default 100) initially */
+    base_cfg.route_prio = 200;  /* Cellular is the primary uplink: above WiFi (default 100). WiFi stays a fallback only while PPP has no route. */
 
     esp_netif_config_t ppp_config = {
         .base = &base_cfg,
