@@ -24,6 +24,7 @@
 #include "esp_timer.h"
 #include "esp_random.h"
 #include "lwip/sockets.h"
+#include "esp_netif.h"
 #include "lwip/netdb.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
@@ -117,6 +118,13 @@ static int ml_derp_bio_send(void *ctx, const unsigned char *buf, size_t len) {
 
 /* DISCO magic bytes: "TS" + sparkles emoji UTF-8 */
 static const uint8_t DISCO_MAGIC[6] = { 'T', 'S', 0xf0, 0x9f, 0x92, 0xac };
+/* Per-type RX frame counters for diagnostics (must be before dispatch_derp_frame) */
+static volatile uint32_t s_derp_rx_recv_packet = 0;
+static volatile uint32_t s_derp_rx_keepalive = 0;
+static volatile uint32_t s_derp_rx_ping = 0;
+static volatile uint32_t s_derp_rx_pong = 0;
+static volatile uint32_t s_derp_rx_peer_gone = 0;
+static volatile uint32_t s_derp_rx_other = 0;
 
 /* ============================================================================
  * TLS Read/Write Helpers
@@ -327,6 +335,7 @@ static void dispatch_derp_frame(microlink_t *ml, uint8_t frame_type,
                                  uint8_t *src_key, uint8_t *payload, size_t payload_len) {
     switch (frame_type) {
     case DERP_FRAME_RECV_PACKET:
+        s_derp_rx_recv_packet++;
         if (payload) {
             ESP_LOGI(TAG, "DERP RecvPacket: %d bytes from %02x%02x%02x%02x, hdr=%02x",
                      (int)payload_len,
@@ -338,10 +347,12 @@ static void dispatch_derp_frame(microlink_t *ml, uint8_t frame_type,
         break;
 
     case DERP_FRAME_KEEP_ALIVE:
+        s_derp_rx_keepalive++;
         ESP_LOGD(TAG, "DERP KeepAlive received");
         break;
 
     case DERP_FRAME_PING:
+        s_derp_rx_ping++;
         /* Echo ping data back as PONG directly (single-threaded, safe to write) */
         if (payload && payload_len > 0) {
             ESP_LOGD(TAG, "DERP PING received, sending PONG");
@@ -350,10 +361,12 @@ static void dispatch_derp_frame(microlink_t *ml, uint8_t frame_type,
         break;
 
     case DERP_FRAME_PONG:
+        s_derp_rx_pong++;
         ESP_LOGD(TAG, "DERP PONG received");
         break;
 
     case DERP_FRAME_PEER_GONE:
+        s_derp_rx_peer_gone++;
         if (payload && payload_len >= 32) {
             ESP_LOGI(TAG, "DERP PeerGone: %02x%02x%02x%02x (len=%d)",
                      payload[0], payload[1], payload[2], payload[3],
@@ -362,6 +375,7 @@ static void dispatch_derp_frame(microlink_t *ml, uint8_t frame_type,
         break;
 
     default:
+        s_derp_rx_other++;
         ESP_LOGD(TAG, "DERP frame type 0x%02x ignored (%d bytes)",
                  frame_type, (int)payload_len);
         break;
@@ -572,6 +586,13 @@ void ml_derp_tx_task(void *arg) {
                          ml->derp.connected, ml->derp.sockfd,
                          (unsigned long)s_derp_frames_rx, (unsigned long)frames_tx,
                          (unsigned long)loop_count);
+                ESP_LOGW(TAG, "  RX breakdown: RecvPkt=%lu KeepAlive=%lu PING=%lu PONG=%lu PeerGone=%lu Other=%lu",
+                         (unsigned long)s_derp_rx_recv_packet,
+                         (unsigned long)s_derp_rx_keepalive,
+                         (unsigned long)s_derp_rx_ping,
+                         (unsigned long)s_derp_rx_pong,
+                         (unsigned long)s_derp_rx_peer_gone,
+                         (unsigned long)s_derp_rx_other);
                 last_status_ms = now_ms;
             }
         }
@@ -836,24 +857,63 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
     ESP_LOGI(TAG, "Connecting to DERP %s:%d (region %d)",
              derp_host, derp_port, ml->derp_home_region ? ml->derp_home_region : ML_DERP_REGION);
 
-    /* DNS resolve — accept IPv4 or IPv6 (carrier may be IPv6-only) */
+    /* DNS resolve — accept IPv4 or IPv6 (carrier may be IPv6-only).
+     * Falls back to a hardcoded IP when the carrier provides no DNS
+     * (e.g. Hologram PPP). The manual addrinfo keeps the rest of the
+     * connect flow (socket create, TLS, DERP handshake) unchanged. */
     struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
     struct addrinfo *res = NULL;
+    struct addrinfo *manual_res = NULL;
+    struct sockaddr_in manual_addr = {0};
     char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", derp_port);
+    int64_t t_derp_dns = 0;
 
-    if (ml_getaddrinfo(derp_host, port_str, &hints, &res) != 0 || !res) {
-        ESP_LOGE(TAG, "DNS resolve failed for %s", derp_host);
-        return ESP_FAIL;
+    /* Ensure DNS works: IoT carriers (Hologram) provide a non-functional
+     * DNS on the PPP link. Set 8.8.8.8 on the default netif so
+     * getaddrinfo() can resolve DERP hostnames. */
+    {
+        esp_netif_t *def_netif = esp_netif_get_default_netif();
+        if (def_netif) {
+            esp_netif_dns_info_t dns;
+            esp_netif_get_dns_info(def_netif, ESP_NETIF_DNS_MAIN, &dns);
+            if (dns.ip.u_addr.ip4.addr == 0x08080808) {
+                /* already set */
+            } else {
+                esp_netif_dns_info_t pub;
+                memset(&pub, 0, sizeof(pub));
+                pub.ip.u_addr.ip4.addr = 0x08080808;
+                esp_netif_set_dns_info(def_netif, ESP_NETIF_DNS_MAIN, &pub);
+                ESP_LOGW(TAG, "Set 8.8.8.8 DNS on default netif for DERP resolve");
+            }
+        }
     }
 
-    int64_t t_derp_dns = esp_timer_get_time();
-    ESP_LOGI(TAG, "[TIMING] DERP DNS: %lld ms", (t_derp_dns - t_derp_start) / 1000);
+    if (ml_getaddrinfo(derp_host, port_str, &hints, &res) != 0 || !res) {
+        ESP_LOGW(TAG, "DNS resolve failed for %s — using hardcoded fallback", derp_host);
+        /* Force SNI to match the hardcoded IP (derp1.tailscale.com = NYC) */
+        derp_host = "derp1.tailscale.com";
+        manual_addr.sin_family = AF_INET;
+        manual_addr.sin_port = htons(443);
+        inet_aton("159.89.225.99", &manual_addr.sin_addr);
+        static struct addrinfo manual_ai;
+        manual_res = &manual_ai;
+        manual_res->ai_family = AF_INET;
+        manual_res->ai_socktype = SOCK_STREAM;
+        manual_res->ai_addr = (struct sockaddr *)&manual_addr;
+        manual_res->ai_addrlen = sizeof(manual_addr);
+        t_derp_dns = esp_timer_get_time();
+    } else {
+        t_derp_dns = esp_timer_get_time();
+        ESP_LOGI(TAG, "[TIMING] DERP DNS: %lld ms", (t_derp_dns - t_derp_start) / 1000);
+    }
 
-    /* TCP connect — use address family from DNS result */
-    int sock = ml_socket(res->ai_family, SOCK_STREAM, 0);
+    struct addrinfo *ai = res ? res : manual_res;
+
+    /* TCP connect — use address family from DNS/fallback result */
+    int sock = ml_socket(ai->ai_family, SOCK_STREAM, 0);
     if (sock < 0) {
-        ml_freeaddrinfo(res);
+        if (res) ml_freeaddrinfo(res);
         return ESP_FAIL;
     }
 
@@ -866,16 +926,16 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
      * physical uplink, not the WG default route — see ml_bind_sock_to_upstream). */
     ml_bind_sock_to_upstream(ml, sock);
 
-    if (ml_connect(sock, res->ai_addr, res->ai_addrlen) < 0) {
+    if (ml_connect(sock, ai->ai_addr, ai->ai_addrlen) < 0) {
         ESP_LOGE(TAG, "TCP connect failed: %d", errno);
         ml_close_sock(sock);
-        ml_freeaddrinfo(res);
+        if (res) ml_freeaddrinfo(res);
         return ESP_FAIL;
     }
-    ml_freeaddrinfo(res);
+    if (res) ml_freeaddrinfo(res);
 
     int64_t t_derp_tcp = esp_timer_get_time();
-    ESP_LOGI(TAG, "[TIMING] DERP TCP connect: %lld ms", (t_derp_tcp - t_derp_dns) / 1000);
+    ESP_LOGI(TAG, "[TIMING] DERP TCP connect: %lld ms", (t_derp_tcp - t_derp_start) / 1000);
 
     /* TLS setup */
     mbedtls_ssl_init(&ml->derp.ssl);
@@ -1109,11 +1169,14 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         memcpy(ci_payload + 32 + NACL_BOX_NONCEBYTES, ciphertext, ciphertext_len);
         free(ciphertext);
 
-        ESP_LOGI(TAG, "DERP ClientInfo node_key=%02x%02x%02x%02x%02x%02x%02x%02x",
-                 ml->wg_public_key[0], ml->wg_public_key[1],
-                 ml->wg_public_key[2], ml->wg_public_key[3],
-                 ml->wg_public_key[4], ml->wg_public_key[5],
-                 ml->wg_public_key[6], ml->wg_public_key[7]);
+        ESP_LOGW(TAG, "DERP ClientInfo full node_key:");
+        for (int i = 0; i < 32; i += 8) {
+            ESP_LOGW(TAG, "  [%d] %02x%02x%02x%02x%02x%02x%02x%02x",
+                     i, ml->wg_public_key[i], ml->wg_public_key[i+1],
+                     ml->wg_public_key[i+2], ml->wg_public_key[i+3],
+                     ml->wg_public_key[i+4], ml->wg_public_key[i+5],
+                     ml->wg_public_key[i+6], ml->wg_public_key[i+7]);
+        }
 
         /* Send ClientInfo frame */
         if (derp_write_frame(ml, DERP_FRAME_CLIENT_INFO, ci_payload, ci_payload_len) < 0) {
@@ -1132,15 +1195,19 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         uint32_t si_len;
         err = derp_recv_frame_header(ml, &si_type, &si_len, DERP_CONNECT_TIMEOUT_MS);
         if (err == ESP_OK && si_type == DERP_FRAME_SERVER_INFO && si_len > 0) {
-            /* Read and discard ServerInfo payload */
-            uint8_t *si_buf = malloc(si_len);
+            uint8_t *si_buf = malloc(si_len + 1);
             if (si_buf) {
-                derp_tls_read_all(ml, si_buf, si_len, DERP_CONNECT_TIMEOUT_MS);
+                int n = derp_tls_read_all(ml, si_buf, si_len, DERP_CONNECT_TIMEOUT_MS);
+                if (n > 0) {
+                    si_buf[n] = '\0';
+                    ESP_LOGW(TAG, "ServerInfo: %s", si_buf);
+                }
                 free(si_buf);
             }
-            ESP_LOGI(TAG, "ServerInfo received (discarded)");
         } else if (err != ESP_OK) {
             ESP_LOGW(TAG, "No ServerInfo frame (continuing anyway)");
+        } else {
+            ESP_LOGW(TAG, "ServerInfo: unexpected type 0x%02x len=%lu", si_type, (unsigned long)si_len);
         }
     }
 

@@ -491,6 +491,8 @@ static void ppp_status_event_handler(void *arg, esp_event_base_t event_base,
 static void ppp_ip_event_handler(void *arg, esp_event_base_t event_base,
                                    int32_t event_id, void *event_data)
 {
+    ESP_LOGW(TAG, "ppp_ip_event_handler called: event_id=%ld netif=%p ppp_netif=%p",
+              (long)event_id, (void*)event_data, (void*)s_cell.ppp_netif);
     if (event_id == IP_EVENT_PPP_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         if (event->esp_netif != s_cell.ppp_netif) return;
@@ -501,6 +503,19 @@ static void ppp_ip_event_handler(void *arg, esp_event_base_t event_base,
         esp_netif_get_dns_info(s_cell.ppp_netif, ESP_NETIF_DNS_MAIN, &dns_info);
         ESP_LOGI(TAG, "PPP DNS: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
 
+        /* Always override with a public DNS server. IoT carriers like
+         * Hologram provide a non-zero DNS that doesn't actually work,
+         * breaking getaddrinfo() for DERP/control-plane. 8.8.8.8 is
+         * reachable from the PPP link and resolves reliably. */
+        {
+            esp_netif_dns_info_t pub_dns;
+            memset(&pub_dns, 0, sizeof(pub_dns));
+            pub_dns.ip.u_addr.ip4.addr = 0x08080808; /* 8.8.8.8 */
+            esp_netif_set_dns_info(s_cell.ppp_netif, ESP_NETIF_DNS_MAIN, &pub_dns);
+            /* Make PPP the default netif so getaddrinfo() uses its DNS */
+            esp_netif_set_default_netif(s_cell.ppp_netif);
+            ESP_LOGW(TAG, "Set 8.8.8.8 DNS + PPP as default netif");
+        }
         s_cell.info.data_connected = true;
         s_cell.state = ML_CELL_STATE_PPP_CONNECTED;
         xEventGroupSetBits(s_cell.ppp_events, PPP_GOT_IP_BIT);

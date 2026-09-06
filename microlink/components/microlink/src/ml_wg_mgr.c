@@ -500,6 +500,10 @@ static void wg_register_peer(microlink_t *ml, ml_peer_t *p) {
         /* Convert peer public key to base64 */
         char peer_b64[64];
         key_to_base64(p->public_key, peer_b64, sizeof(peer_b64));
+        ESP_LOGW(TAG, "Peer '%s' key: %s (first8=%02x%02x%02x%02x%02x%02x%02x%02x)",
+                 p->hostname, peer_b64,
+                 p->public_key[0], p->public_key[1], p->public_key[2], p->public_key[3],
+                 p->public_key[4], p->public_key[5], p->public_key[6], p->public_key[7]);
 
         struct wireguardif_peer wg_peer;
         wireguardif_peer_init(&wg_peer);
