@@ -556,6 +556,32 @@ static void ppp_rx_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* Free PPP resources allocated by ppp_setup_and_dial() after a failure where
+ * the PPP FSM was never started (the dial never reached CONNECT). The netif
+ * was created but esp_netif_action_start() was never called, so there is no
+ * TCPIP-thread activity on it and it can be destroyed directly. Without this,
+ * each failed-dial cycle leaks a netif + event group + 2 event handlers
+ * (ml_cellular_deinit only tears down PPP when ppp_running is true). */
+static void ppp_cleanup_unstarted(void)
+{
+    if (s_cell.ppp_status_handler) {
+        esp_event_handler_instance_unregister(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, s_cell.ppp_status_handler);
+        s_cell.ppp_status_handler = NULL;
+    }
+    if (s_cell.ip_event_handler) {
+        esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, s_cell.ip_event_handler);
+        s_cell.ip_event_handler = NULL;
+    }
+    if (s_cell.ppp_netif) {
+        esp_netif_destroy(s_cell.ppp_netif);
+        s_cell.ppp_netif = NULL;
+    }
+    if (s_cell.ppp_events) {
+        vEventGroupDelete(s_cell.ppp_events);
+        s_cell.ppp_events = NULL;
+    }
+}
+
 static esp_err_t ppp_setup_and_dial(void)
 {
     char resp[512];
@@ -726,6 +752,7 @@ static esp_err_t ppp_setup_and_dial(void)
     }
     if (!dial_ok) {
         ESP_LOGE(TAG, "PPP dial failed (3 attempts)");
+        ppp_cleanup_unstarted();
         s_cell.state = ML_CELL_STATE_ERROR;
         return ESP_FAIL;
     }
@@ -767,16 +794,16 @@ static esp_err_t ppp_setup_and_dial(void)
 
     if (bits & PPP_CHAP_FAIL_BIT) {
         ESP_LOGW(TAG, "PPP CHAP authentication failed");
-        s_cell.ppp_running = false;
-        vTaskDelay(pdMS_TO_TICKS(200));
-        s_cell.state = ML_CELL_STATE_REGISTERED;
+        /* Full teardown: stop the PPP FSM, wait for the close callback, free
+         * netif/event group/handlers, and escape back to AT mode. */
+        ml_cellular_ppp_stop();
         return ESP_ERR_NOT_SUPPORTED;   /* Distinct from timeout — caller can fall back */
     }
 
     ESP_LOGE(TAG, "PPP connection timeout");
-    s_cell.ppp_running = false;
-    vTaskDelay(pdMS_TO_TICKS(200)); /* Let RX task exit */
-    s_cell.state = ML_CELL_STATE_ERROR;
+    /* Full teardown (see CHAP path above) — the FSM was started, so the netif
+     * must be stopped before it can be destroyed. */
+    ml_cellular_ppp_stop();
     return ESP_ERR_TIMEOUT;
 }
 
@@ -910,8 +937,9 @@ void ml_cellular_deinit(void)
 {
     if (s_cell.state == ML_CELL_STATE_OFF) return;
 
-    /* Stop PPP if running */
-    if (s_cell.ppp_running) {
+    /* Stop PPP if running, or if a failed dial left the netif allocated
+     * (ppp_running is false but ppp_netif is still set). */
+    if (s_cell.ppp_running || s_cell.ppp_netif) {
         ml_cellular_ppp_stop();
     }
 

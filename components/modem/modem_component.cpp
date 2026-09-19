@@ -3,7 +3,6 @@
 
 #include "esphome/core/log.h"
 #include "esp_netif.h"
-#include "lwip/ip4_addr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -20,7 +19,9 @@ ModemComponent::ModemComponent() { global_modem_component = this; }
 
 void ModemComponent::setup() {
   ESP_LOGI(TAG, "Initializing cellular modem (SIM7670G PPP)...");
-  xTaskCreate(dial_task_trampoline, "modem_dial", 8192, this, 5, nullptr);
+  if (xTaskCreate(dial_task_trampoline, "modem_dial", 8192, this, 5, nullptr) != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create dial task — cellular uplink will not start");
+  }
   ESP_LOGI(TAG, "Cellular dial task spawned");
 }
 
@@ -47,7 +48,10 @@ void ModemComponent::bring_up_() {
     ESP_LOGI(TAG, "Bringing up cellular (SIM7670G PPP) uplink...");
     if (this->try_dial_()) {
       this->data_up_ = true;
-      this->publish_state_();
+      // Do NOT publish_state_() here — this runs on the dial task, and
+      // Sensor/BinarySensor::publish_state() is not thread-safe (it reaches
+      // the API/web-server controllers, which must only be touched from the
+      // loop thread). loop() detects the data_up_ transition and publishes.
       return;
     }
     ESP_LOGW(TAG, "Cellular bring-up failed — retrying in %d s", backoff_s);
@@ -69,11 +73,10 @@ bool ModemComponent::try_dial_() {
   ml_cellular_deinit();
 
   ml_cellular_config_t cell_config = ML_CELLULAR_DEFAULT_CONFIG();
-  // Pin 0 / -1 = use the microlink board-preset defaults (LILYGO T-SIM7670G-S3).
-  if (this->tx_pin_ != 0)
-    cell_config.tx_pin = this->tx_pin_;
-  if (this->rx_pin_ != 0)
-    cell_config.rx_pin = this->rx_pin_;
+  // UART pins are required in the schema and passed at runtime via the config
+  // struct (the driver does NOT read CONFIG_ML_CELLULAR_TX_PIN/RX_PIN).
+  cell_config.tx_pin = this->tx_pin_;
+  cell_config.rx_pin = this->rx_pin_;
   if (!this->apn_.empty())
     cell_config.apn = this->apn_.c_str();
   if (!this->sim_pin_.empty())
@@ -110,14 +113,22 @@ void ModemComponent::loop() {
   // Detect cellular data link loss (PPP drop, carrier loss, modem reset) and
   // redial. data_connected is the driver's authoritative "link is up" flag
   // (set on PPP IP acquisition, cleared on IP loss / stop).
-  if (this->data_up_.load()) {
+  bool up = this->data_up_.load();
+  if (up) {
     ml_cellular_info_t info;
     if (ml_cellular_get_info(&info) == ESP_OK && !info.data_connected) {
       ESP_LOGW(TAG, "Cellular data link lost — redialing");
       this->data_up_ = false;
-      this->publish_state_();
-      xTaskCreate(dial_task_trampoline, "modem_dial", 8192, this, 5, nullptr);
+      up = false;
+      if (xTaskCreate(dial_task_trampoline, "modem_dial", 8192, this, 5, nullptr) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create redial task");
+      }
     }
+  }
+  // Publish state on transition (loop thread only — see bring_up_()).
+  if (up != this->last_published_up_) {
+    this->last_published_up_ = up;
+    this->publish_state_();
   }
 #endif
 }

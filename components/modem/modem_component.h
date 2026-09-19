@@ -31,7 +31,7 @@ class ModemComponent : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
-  // Set up after the network component (AFTER_BLUETOOTH = 300) so
+  // Set up after the network component (AFTER_BLUETOOTH=300 > WIFI=250) so
   // esp_netif_init() has run before the dial task creates the PPP netif.
   float get_setup_priority() const override { return setup_priority::WIFI; }
 
@@ -74,6 +74,7 @@ class ModemComponent : public Component {
   int dtr_pin_{-1};
 
   std::atomic<bool> data_up_{false};
+  bool last_published_up_{false};  // loop-thread only (publish on transition)
   char use_address_buf_[16] = {0};
 
 #ifdef USE_BINARY_SENSOR
