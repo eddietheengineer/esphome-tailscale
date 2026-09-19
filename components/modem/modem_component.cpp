@@ -129,10 +129,13 @@ const char *ModemComponent::get_use_address() {
   esp_netif_t *netif = esp_netif_get_default_netif();
   if (netif != nullptr) {
     esp_netif_ip_info_t ip_info;
-    if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK)
-      return ip4addr_ntoa(&ip_info.ip);
+    if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+      esp_ip4addr_ntoa(&ip_info.ip, this->use_address_buf_, sizeof(this->use_address_buf_));
+      return this->use_address_buf_;
+    }
   }
-  return "";
+  this->use_address_buf_[0] = '\0';
+  return this->use_address_buf_;
 }
 
 network::IPAddresses ModemComponent::get_ip_addresses() {
@@ -140,8 +143,11 @@ network::IPAddresses ModemComponent::get_ip_addresses() {
   esp_netif_t *netif = esp_netif_get_default_netif();
   if (netif != nullptr) {
     esp_netif_ip_info_t ip_info;
-    if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK)
-      addrs[0] = network::IPAddress(&ip_info.ip);
+    if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+      char buf[16];
+      esp_ip4addr_ntoa(&ip_info.ip, buf, sizeof(buf));
+      addrs[0] = network::IPAddress(std::string(buf));
+    }
   }
   return addrs;
 }
