@@ -74,7 +74,6 @@ class ModemComponent : public Component {
   int dtr_pin_{-1};
 
   std::atomic<bool> data_up_{false};
-  char use_address_buf_[16] = {0};
 
 #ifdef USE_BINARY_SENSOR
   binary_sensor::BinarySensor *data_connected_sensor_{nullptr};
