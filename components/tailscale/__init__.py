@@ -30,6 +30,7 @@ CONF_DISABLE_TELEMETRY = "disable_telemetry"
 CONF_NETCHECK_OVERRIDE = "netcheck_override"
 CONF_NETCHECK_OVERRIDE_THRESHOLD = "netcheck_override_threshold"
 CONF_IPN_VERSION = "ipn_version"
+CONF_START_ENABLED = "start_enabled"
 CONF_CELLULAR = "cellular"
 CONF_CELLULAR_ENABLED = "enabled"
 CONF_CELLULAR_APN = "apn"
@@ -93,6 +94,10 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_IPN_VERSION, default=""): cv.string,
         # Cellular (SIM7670G PPP) uplink — see CELLULAR_SCHEMA above.
         cv.Optional(CONF_CELLULAR, default={}): CELLULAR_SCHEMA,
+        # Start the Tailscale node at boot. Set false to keep the node off by
+        # default (saves cellular data + PSRAM) and enable it on-demand via the
+        # vpn_enabled switch (e.g. for OTA). Defaults to true.
+        cv.Optional(CONF_START_ENABLED, default=True): cv.boolean,
     }
 )
 
@@ -120,6 +125,7 @@ async def to_code(config):
 
     cg.add(var.set_telemetry_disabled(config[CONF_DISABLE_TELEMETRY]))
     cg.add(var.set_ipn_version(config[CONF_IPN_VERSION]))
+    cg.add(var.set_start_enabled(config[CONF_START_ENABLED]))
 
     # Cellular (SIM7670G PPP) uplink. Hand the APN / SIM / PPP credentials to the
     # C++ component (it calls ml_cellular_init() + ml_cellular_connect() in

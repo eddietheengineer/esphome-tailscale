@@ -52,6 +52,10 @@ class TailscaleComponent : public Component {
   void set_cellular_sim_pin(const std::string &pin) { this->cellular_sim_pin_ = pin; }
   void set_cellular_ppp_user(const std::string &user) { this->cellular_ppp_user_ = user; }
   void set_cellular_ppp_pass(const std::string &pass) { this->cellular_ppp_pass_ = pass; }
+  // Initial state of the VPN (tailscale_user_enabled_). When false, the node
+  // does not start microlink at boot — it stays off until the enable switch is
+  // turned on (e.g. on-demand for OTA). Defaults to true (start at boot).
+  void set_start_enabled(bool enabled) { this->tailscale_user_enabled_ = enabled; }
 #ifdef USE_SWITCH
   void set_debug_log_switch(switch_::Switch *sw) { this->debug_log_switch_ = sw; }
 #endif
@@ -139,6 +143,7 @@ class TailscaleComponent : public Component {
   void request_reconnect();
   void set_tailscale_enabled(bool enabled);
   void confirm_enable_rollback();
+  bool is_user_enabled() const { return this->tailscale_user_enabled_; }
 
  protected:
   // Static callbacks for microlink
@@ -272,7 +277,7 @@ class TailscaleReconnectButton : public button::Button, public Component {
 class TailscaleEnableSwitch : public switch_::Switch, public Component {
  public:
   void set_parent(TailscaleComponent *parent) { this->parent_ = parent; }
-  void setup() override { this->publish_state(true); }
+  void setup() override { this->publish_state(this->parent_->is_user_enabled()); }
 
  protected:
   void write_state(bool state) override {
