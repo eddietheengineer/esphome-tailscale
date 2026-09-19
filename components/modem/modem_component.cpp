@@ -17,10 +17,6 @@ static const char *const TAG = "modem";
 ModemComponent *global_modem_component = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 ModemComponent::ModemComponent() { global_modem_component = this; }
-ModemComponent::~ModemComponent() {
-  if (global_modem_component == this)
-    global_modem_component = nullptr;
-}
 
 void ModemComponent::setup() {
   ESP_LOGI(TAG, "Initializing cellular modem (SIM7670G PPP)...");
